@@ -26,6 +26,8 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(Boost REQUIRED system)
 
+find_package(std_msgs REQUIRED)
+
 ################################################################################
 # Build
 ################################################################################
@@ -35,11 +37,20 @@ include_directories(
 )
 
 add_executable(hlds_laser_publisher	src/hlds_laser_publisher.cpp)
+add_executable(hlds_laser_intensity_publisher	src/hlds_laser_intensity_publisher.cpp)
+
 target_link_libraries(hlds_laser_publisher ${Boost_LIBRARIES})
 ament_target_dependencies(hlds_laser_publisher
   rclcpp
   std_msgs
   sensor_msgs
+)
+
+
+target_link_libraries(hlds_laser_intensity_publisher ${Boost_LIBRARIES})
+ament_target_dependencies(hlds_laser_intensity_publisher
+  rclcpp
+  std_msgs
 )
 
 ################################################################################
@@ -50,7 +61,9 @@ install(DIRECTORY launch rviz
 )
 
 install(
-  TARGETS hlds_laser_publisher
+  TARGETS 
+  hlds_laser_publisher
+  hlds_laser_intensity_publisher
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
