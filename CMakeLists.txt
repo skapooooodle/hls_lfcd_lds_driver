@@ -36,21 +36,39 @@ include_directories(
   ${Boost_INCLUDE_DIRS}
 )
 
-add_executable(hlds_laser_publisher	src/hlds_laser_publisher.cpp)
-add_executable(hlds_laser_intensity_publisher	src/hlds_laser_intensity_publisher.cpp)
 
+#add_executable(hlds_laser_publisher	src/hlds_laser_publisher.cpp)
+add_executable(hlds_laser_intensity_publisher	src/hlds_laser_intensity_publisher.cpp)
+add_executable(hlds_laser_intensity_test_publisher	src/hlds_laser_intensity_test_publisher.cpp)
+add_executable(hlds_laser_intensity_test_subscriber	src/hlds_laser_intensity_test_subscriber.cpp)
+
+#[===[
 target_link_libraries(hlds_laser_publisher ${Boost_LIBRARIES})
 ament_target_dependencies(hlds_laser_publisher
   rclcpp
   std_msgs
   sensor_msgs
 )
-
+]===]
 
 target_link_libraries(hlds_laser_intensity_publisher ${Boost_LIBRARIES})
 ament_target_dependencies(hlds_laser_intensity_publisher
   rclcpp
   std_msgs
+)
+
+target_link_libraries(hlds_laser_intensity_test_publisher ${Boost_LIBRARIES})
+ament_target_dependencies(hlds_laser_intensity_test_publisher
+  rclcpp
+  std_msgs
+  sensor_msgs
+)
+
+target_link_libraries(hlds_laser_intensity_test_subscriber ${Boost_LIBRARIES})
+ament_target_dependencies(hlds_laser_intensity_test_subscriber
+  rclcpp
+  std_msgs
+  sensor_msgs
 )
 
 ################################################################################
@@ -62,8 +80,10 @@ install(DIRECTORY launch rviz
 
 install(
   TARGETS 
-  hlds_laser_publisher
+  #hlds_laser_publisher
   hlds_laser_intensity_publisher
+  hlds_laser_intensity_test_publisher
+  hlds_laser_intensity_test_subscriber
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -32,35 +32,23 @@
  /* Authors: Pyo, Darby Lim, SP Kong, JH Yang */
  /* maintainer: Pyo */
 
-#include <chrono>
-#include <functional>
-#include <memory>
-#include <string>
-
-#include<unistd.h>
-
 #include <rclcpp/rclcpp.hpp>
-//#include <sensor_msgs/msg/laser_scan.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 #include <boost/asio.hpp>
-#include <hls_lfcd_lds_driver/lfcd_laser_inten.hpp>
-
-#include "std_msgs/msg/string.hpp"
-#include "std_msgs/msg/float32.hpp"
+#include <hls_lfcd_lds_driver/lfcd_laser.hpp>
+#include <math.h>
 
 #include <algorithm>
 #include <iterator>
-#include <iostream>
-#include <cmath>
+#include <string> 
 
 /*********** range of intensity of white line ***********/
-#define min_white_line_intensity 900                  //test for correct numbers required
-#define max_white_line_intensity 3079
+#define min_white_line_intensity 5500                  //tested values (regarding excel table)
+#define max_white_line_intensity 7500
 
 /*********** field of view (LiDAR) ***********/
-#define min_angle_range 50                            //equals to 400 mm Spurbreite.eng(xd)
+#define min_angle_range 50                            //this equals to 400mm Spurbreite (no ingles)
 #define max_angle_range 310
-
-uint16_t set_counter = 0;
 
 namespace hls_lfcd_lds
 {
@@ -77,9 +65,7 @@ LFCDLaser::~LFCDLaser()
   boost::asio::write(serial_, boost::asio::buffer("e", 1));  // stop motor
 }
 
-//void LFCDLaser::poll(sensor_msgs::msg::LaserScan::SharedPtr scan)
-//void LFCDLaser::poll(std_msgs::msg::String::SharedPtr message)
-void LFCDLaser::poll(std_msgs::msg::Float32::SharedPtr message)
+void LFCDLaser::poll(sensor_msgs::msg::LaserScan::SharedPtr scan)
 {
   uint8_t start_count = 0;
   bool got_scan = false;
@@ -89,18 +75,6 @@ void LFCDLaser::poll(std_msgs::msg::Float32::SharedPtr message)
   rpms=0;
   int index;
 
-  uint16_t intensities[360];
-
-  //uint16_t dan_counter;
-  //uint16_t mid_point_line[2];
-  //uint16_t angles[min_angle_range];
-
-  //unsigned int microsecond = 1000;
-/*
-  auto node = rclcpp::Node::make_shared("hlds_laser_intensity_publisher");
-  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_;
-  publisher_ = node->create_publisher<std_msgs::msg::Float32>("scan_inten", rclcpp::QoS(rclcpp::SensorDataQoS()));
-*/
   while (!shutting_down_ && !got_scan)
   {
     // Wait until first data sync of frame: 0xFA, 0xA0
@@ -123,108 +97,91 @@ void LFCDLaser::poll(std_msgs::msg::Float32::SharedPtr message)
         got_scan = true;
 
         boost::asio::read(serial_,boost::asio::buffer(&raw_bytes[2], 2518));
-        
+
+        scan->angle_increment = (2.0*M_PI/360.0);
+        scan->angle_min = 0.0;
+        scan->angle_max = 2.0*M_PI-scan->angle_increment;
+        //scan->range_min = 0.12;
+        scan->range_max = 3.5;
+        scan->ranges.resize(360);
+        scan->intensities.resize(360);
+
+        //read data in sets of 6
         for(uint16_t i = 0; i < raw_bytes.size(); i=i+42)
         {
           if(raw_bytes[i] == 0xFA && raw_bytes[i+1] == (0xA0 + i / 42)) //&& CRC check
           {
             good_sets++;
             motor_speed += (raw_bytes[i+3] << 8) + raw_bytes[i+2]; //accumulate count for avg. time increment
-            rpms=(raw_bytes[i+3]<<8|raw_bytes[i+2])/10;
 
             for(uint16_t j = i+4; j < i+40; j=j+6)
             {
               index = 6*(i/42) + (j-4-i)/6;
 
+              // Four bytes per reading
               uint8_t byte0 = raw_bytes[j];
               uint8_t byte1 = raw_bytes[j+1];
+              uint8_t byte2 = raw_bytes[j+2];
+              uint8_t byte3 = raw_bytes[j+3];
+
               uint16_t intensity = (byte1 << 8) + byte0;
-              intensities[359-index] = intensity;
-              //message -> data = intensity; 
-              //dan_counter++;
-              //printf("dan_counter: %d ", dan_counter);
+              uint16_t range = (byte3 << 8) + byte2;
+
+              scan->ranges[359-index] = range / 1000.0;
+              scan->intensities[359-index] = intensity;
             }
           }
-        } 
-      }
-      else
-      {
-        start_count = 0;
-      }          
-    }
-  }
+        }
+
         /********************************* HERE WE GO mit dem latest shit *********************************/
         
         /*** coole variablen ***/
         uint16_t line_angles_b[min_angle_range];
-        uint16_t line_angles_t[360];
+        uint16_t line_angles_t[min_angle_range];
         uint16_t mid_point_line_b;
         uint16_t mid_point_line_t;
 
-        uint8_t min_degree_b = 0;
-        uint16_t min_degree_t = 0;
-
         /*** get midpoint of white line from 0-50° ***/
-        for (int i = 0; i < min_angle_range; i++){
-          if ( (intensities[i] >= min_white_line_intensity) && (intensities[i] <= max_white_line_intensity) ){
-            line_angles_b[i] = i;                                                                                      //append angles with "white" intensity
-            //printf("line_angles_b[%d]= %d \n", i, line_angles_b[i]);
-            if ( (line_angles_b[i-1] == 0) && (line_angles_b[i-2] == 0) ){
-              min_degree_b = i;                                                                                          //get first degree with "white" intensity
-            }
+        for (int i = 0; i <= min_angle_range; i++){
+          if ( (scan->intensities[i] >= min_white_line_intensity) || (scan->intensities[i] <= max_white_line_intensity) ){
+            line_angles_b[i] = i;                                                                                      //append angle with "white" intensity
           } 
-          else {
-            line_angles_b[i] = 0;
-          }
         }
 
         /*** get midpoint of white line from 310-359° ***/
-        for (int i = 359; i > max_angle_range; i--){
-          if ( (intensities[i] >= min_white_line_intensity) && (intensities[i] <= max_white_line_intensity) ){
-            line_angles_t[i] = i;                                                                                      //append angles with "white" intensity
-            min_degree_t = i;
-            //printf("line_angles_t[%d]= %d \n", i, line_angles_t[i]);
+        for (int i = 359; i >= max_angle_range; i--){
+          if ( (scan->intensities[i] >= min_white_line_intensity) || (scan->intensities[i] <= max_white_line_intensity) ){
+            line_angles_t[i] = i;                                                                                      //append angle with "white" intensity
           }
-          else {
-            line_angles_t[i] = 0;
-            //printf("zero out line_angles_t[%d]= %d \n", i, line_angles_t[i]);
-          }
-        }
-
-        for (int i = 0; i <= max_angle_range; i++){
-          line_angles_t[i] = 0;
         }
         
         /*** Get max/min value of array ***/
-        //uint16_t *min_degree_b = std::min_element(std::begin(line_angles_b), std::end(line_angles_b));  
-        //uint16_t *min_degree_t = std::min_element(std::begin(line_angles_t), std::end(line_angles_t));  
+        uint16_t *min_degree_b = std::min_element(std::begin(line_angles_b), std::end(line_angles_b));  
+        uint16_t *min_degree_t = std::min_element(std::begin(line_angles_t), std::end(line_angles_t));  
 
         uint16_t *max_degree_b = std::max_element(std::begin(line_angles_b), std::end(line_angles_b));   
-        uint16_t *max_degree_t = std::max_element(std::begin(line_angles_t), std::end(line_angles_t)); 
-
-        //uint16_t max_degree_b  = std::max_element(line_angles_b.begin(), line_angles_b.end());
-        /*
-        printf("Minimum degree b : %d \n", min_degree_b);
-        std::cout << "Maximum degree b: " << *max_degree_b << std::endl;
-
-        printf("Minimum degree t : %d \n", min_degree_t);
-        std::cout << "Maximum degree t: " << *max_degree_t << std::endl; */
-
-        //printf("min_degree_b = %u \n", min_degree_b); 
+        uint16_t *max_degree_t = std::max_element(std::begin(line_angles_t), std::end(line_angles_t));  
 
         /*** get mid points of white lines ***/
-        mid_point_line_b = round( (min_degree_b + *max_degree_b)/2 ); //int??!!!
-        mid_point_line_t = round( (min_degree_t + *max_degree_t)/2 ); //int??!!!
-
-        printf("mid_point_line_b = %u \n", mid_point_line_b);
-        printf("mid_point_line_t = %u \n", mid_point_line_t); 
+        mid_point_line_b = round( (*min_degree_b + *max_degree_b)/2 ); //int??!!!
+        mid_point_line_t = round( (*min_degree_t + *max_degree_t)/2 ); //int??!!!
 
         /******* Calculate mid point ********/
         //uint16_t mid_point_line = ((mid_point_line_b + (360 - mid_point_line_t)) / 2)-(360 - mid_point_line_t);
-        message->data = ((mid_point_line_b + (360 - mid_point_line_t)) / 2)-(360 - mid_point_line_t) + 4; 
+        scan->range_min = ((mid_point_line_b + (360 - mid_point_line_t)) / 2)-(360 - mid_point_line_t);
 
-        //set_counter++;
-        //printf("   set_counter: %d    ", set_counter); 
+        rpms=motor_speed / good_sets / 10;
+        //printf ("rpm: %d, ",rpms);
+        //printf ("motor_speed: %d, ",motor_speed);
+        scan->time_increment = (float)(1.0 / (rpms*6));
+        scan->scan_time = scan->time_increment * 360;
+      }
+      else
+      {
+        start_count = 0;
+      }
+    }
+  }
 }
 }
 
@@ -232,18 +189,14 @@ int main(int argc, char **argv)
 {
   rclcpp::init(argc, argv);
 
-  auto node = rclcpp::Node::make_shared("hlds_laser_intensity_publisher");
-  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr publisher_;
+  auto node = rclcpp::Node::make_shared("hlds_laser_publisher");
+  rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr laser_pub;
   boost::asio::io_service io;
-
-  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr message;
 
   std::string port;
   std::string frame_id;
   int baud_rate;
 
-  const char* topic = "scan_inten"; //name of topic
-  
   node->declare_parameter<std::string>("port");
   node->declare_parameter<std::string>("frame_id");
 
@@ -252,19 +205,21 @@ int main(int argc, char **argv)
 
   baud_rate = 230400;
 
-  RCLCPP_INFO(node->get_logger(), "Publishing topic: '%s'", topic);
+  RCLCPP_INFO(node->get_logger(), "Init hlds_laser_publisher Node Main");
+  RCLCPP_INFO(node->get_logger(), "port : %s frame_id : %s", port.c_str(), frame_id.c_str());
 
   try
   {
     hls_lfcd_lds::LFCDLaser laser(port, baud_rate, io);
-    publisher_ = node->create_publisher<std_msgs::msg::Float32>(topic, rclcpp::QoS(rclcpp::SensorDataQoS())); 
-    //auto message = std_msgs::msg::Float();
-    
+    laser_pub = node->create_publisher<sensor_msgs::msg::LaserScan>("scan", rclcpp::QoS(rclcpp::SensorDataQoS()));
+
     while (rclcpp::ok())
-    { 
-      auto message = std::make_shared<std_msgs::msg::Float32>();
-      laser.poll(message);
-      publisher_ -> publish(*message);
+    {
+      auto scan = std::make_shared<sensor_msgs::msg::LaserScan>();
+      scan->header.frame_id = frame_id;
+      laser.poll(scan);
+      scan->header.stamp = node->now();
+      laser_pub->publish(*scan);
     }
     laser.close();
 

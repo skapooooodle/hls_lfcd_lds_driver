@@ -33,12 +33,11 @@
  /* maintainer: Pyo */
 
 #include <string>
-//#include <sensor_msgs/msg/laser_scan.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 #include <boost/asio.hpp>
 #include <boost/array.hpp>
 
 #include <std_msgs/msg/string.hpp>
-#include <std_msgs/msg/float32.hpp>
 
 namespace hls_lfcd_lds
 {
@@ -63,7 +62,7 @@ public:
 	* @brief Poll the laser to get a new scan. Blocks until a complete new scan is received or close is called.
 	* @param scan LaserScan message pointer to fill in with the scan. The caller is responsible for filling in the ROS timestamp and frame_id achtung bullshit alarm
 	*/
-	void poll(std_msgs::msg::Float32::SharedPtr message);
+	void poll(std_msgs::msg::String::SharedPtr message);
 
 	/**
 	* @brief Close the driver down and prevent the polling loop from advancing

@@ -44,10 +44,9 @@ def generate_launch_description():
             description='Specifying frame_id of lidar. Default frame_id is \'laser\''),
 
         Node(
-                package='hls_lfcd_lds_driver',
-                executable='hlds_laser_intensity_publisher',
-                name='hlds_laser_intensity_publisher',
-                parameters=[{'port': port, 'frame_id': frame_id}],
-                output='screen'
-            )
+            package='hls_lfcd_lds_driver',
+            executable='hlds_laser_intensity_test_publisher',
+            name='hlds_laser_intensity_test_publisher',
+            parameters=[{'port': port, 'frame_id': frame_id}],
+            output='screen'),
     ])
